@@ -1,0 +1,44 @@
+{
+  "configurations": [
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:adjust-volume}/Prototype",
+      "name": "Debug audiomixctl (Prototype)",
+      "target": "audiomixctl",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug audiomixctl (Prototype)"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:adjust-volume}/Prototype",
+      "name": "Release audiomixctl (Prototype)",
+      "target": "audiomixctl",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release audiomixctl (Prototype)"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:adjust-volume}/MacVolumeMixer",
+      "name": "Debug MacVolumeMixer (MacVolumeMixer)",
+      "target": "MacVolumeMixer",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug MacVolumeMixer (MacVolumeMixer)"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:adjust-volume}/MacVolumeMixer",
+      "name": "Release MacVolumeMixer (MacVolumeMixer)",
+      "target": "MacVolumeMixer",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release MacVolumeMixer (MacVolumeMixer)"
+    }
+  ]
+}

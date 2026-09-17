@@ -1,0 +1,15 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+*.resolved
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# Release artifacts (built by scripts/build-release.sh, published via GitHub Releases instead)
+dist/
+
+# macOS
+.DS_Store
