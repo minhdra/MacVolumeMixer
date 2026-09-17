@@ -24,6 +24,17 @@ final class AudioEngine: ObservableObject {
     /// permanent silence with no explanation. Checking this gate up front,
     /// before ever muting anything, is what prevents that.
     @Published private(set) var permissionGranted: Bool = CGPreflightScreenCaptureAccess()
+    /// True once we've observed permission go from not-granted to granted
+    /// *within this running process*. macOS/coreaudiod appear to latch the
+    /// authorization decision for a process's audio taps at the time it
+    /// first attempts one — granting the permission from System Settings
+    /// while MacVolumeMixer is already running does not reliably take effect
+    /// until the app is quit and relaunched (the same "restart required"
+    /// behavior documented for Screen Recording, which shares this TCC
+    /// category). If we don't gate on this, the app would re-attempt muting
+    /// with what `CGPreflightScreenCaptureAccess()` now reports as "granted"
+    /// but still get silent audio back — the exact bug this flag prevents.
+    @Published private(set) var needsRelaunchToUsePermission = false
 
     private let system = AudioHardwareSystem.shared
     private let monitor = AudioProcessMonitor()
@@ -37,7 +48,7 @@ final class AudioEngine: ObservableObject {
 
     func start() {
         monitor.delegate = self
-        permissionGranted = CGPreflightScreenCaptureAccess()
+        updatePermissionState(CGPreflightScreenCaptureAccess())
         do {
             try monitor.start()
         } catch {
@@ -51,7 +62,16 @@ final class AudioEngine: ObservableObject {
     /// just re-reads the current state so the UI can tell the user to grant
     /// it manually in System Settings instead (see `SettingsView`).
     func requestAudioCapturePermission() {
-        permissionGranted = CGRequestScreenCaptureAccess()
+        updatePermissionState(CGRequestScreenCaptureAccess())
+    }
+
+    private func updatePermissionState(_ granted: Bool) {
+        if granted && !permissionGranted {
+            // Permission just turned on partway through this process's
+            // lifetime — see `needsRelaunchToUsePermission`'s doc comment.
+            needsRelaunchToUsePermission = true
+        }
+        permissionGranted = granted
     }
 
     func stop() {
@@ -154,9 +174,17 @@ extension AudioEngine: AudioProcessMonitorDelegate {
         // whether we're authorized to receive its real audio back — without
         // this check we'd silence the app first and only find out we can't
         // actually replay it after the fact.
-        permissionGranted = CGPreflightScreenCaptureAccess()
+        updatePermissionState(CGPreflightScreenCaptureAccess())
         guard permissionGranted else {
             lastError = "MacVolumeMixer needs \"Screen & System Audio Recording\" permission before it can control \(app.displayName)'s volume. Open Settings to grant it."
+            return
+        }
+        // Even though macOS now reports the permission as granted, if it
+        // turned on partway through this run it likely won't actually work
+        // until relaunch (see `needsRelaunchToUsePermission`) — attempting
+        // the tap anyway would just reproduce the "muted but silent" bug.
+        guard !needsRelaunchToUsePermission else {
+            lastError = "Permission was just granted — restart MacVolumeMixer to use it for \(app.displayName)."
             return
         }
 

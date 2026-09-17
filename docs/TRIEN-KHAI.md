@@ -136,7 +136,7 @@ ngắn hơn, dùng `throws` thay vì tự check `OSStatus` thủ công ở khắ
 và bằng chứng: [audio-architecture.md](audio-architecture.md), phần "Update: a newer, Swift-native Core
 Audio surface exists".
 
-## 7. Hai bug thực tế đã gặp và cách sửa (v0.1.1)
+## 7. Ba bug thực tế đã gặp và cách sửa
 
 - **Mất hẳn tiếng khi mở app**: nguyên nhân đúng như cảnh báo ở mục 5 — bản v0.1.0 câm app ngay khi phát
   hiện nó đang phát tiếng, mà chưa chắc mình đã có quyền để phát lại. Sửa bằng cách gọi
@@ -150,6 +150,15 @@ Audio surface exists".
   chui vào Settings mới thấy; (2) `applicationWillTerminate` giờ luôn đặt một hẹn giờ "ép thoát"
   (`exit(0)`) chạy trên queue nền, độc lập với main thread — dù bước dọn dẹp Core Audio có bị treo vì lý
   do gì, app vẫn đảm bảo thoát hẳn trong tối đa 1 giây.
+- **Đã cấp quyền rồi mà vẫn câm** (bug gặp ngay sau khi sửa bug đầu tiên ở trên): cấp quyền `Screen &
+  System Audio Recording` **trong lúc app đang chạy** không có tác dụng ngay — giống hệt cơ chế của
+  quyền Screen Recording (macOS Sonoma gộp chung 2 quyền này). `coreaudiod` có vẻ chốt quyết định cấp
+  quyền cho một process ngay tại thời điểm process đó thử tap lần đầu; bật quyền lên giữa chừng không
+  làm process đang chạy nhận ra ngay, phải khởi động lại app. `AudioEngine` giờ tự phát hiện chuyển trạng
+  thái "chưa có quyền → có quyền" NGAY TRONG PHIÊN CHẠY này (`needsRelaunchToUsePermission`), và nếu phát
+  hiện đúng trường hợp đó thì **không thử tap nữa** (tránh lặp lại y hệt bug câm-mà-không-phát-lại), thay
+  vào đó hiện nút "Restart Now" — bấm vào sẽ tự tắt app cũ, mở lại app mới (`AppDelegate.relaunch()`
+  dùng `/usr/bin/open` mở lại chính bundle của mình rồi thoát tiến trình hiện tại).
 
 ## 8. Giới hạn cần biết (không giấu)
 

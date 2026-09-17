@@ -60,9 +60,12 @@ final class UpdateCheckViewModel: ObservableObject {
 /// nothing to configure, since volume/mute live in the popover itself and
 /// persistence is automatic.
 struct SettingsView: View {
-    // Owned by AppDelegate (not @StateObject here) so the same instance can
-    // run the opt-in launch-time check before this view ever exists.
+    // Both owned by AppDelegate (not @StateObject here) so they're the same
+    // instances the popover reads, and so update-on-launch / permission
+    // state started before this window ever exists is reflected here too.
+    @ObservedObject var engine: AudioEngine
     @ObservedObject var updateChecker: UpdateCheckViewModel
+    var onRestart: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -72,6 +75,23 @@ struct SettingsView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if engine.needsRelaunchToUsePermission {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Permission granted, but macOS needs MacVolumeMixer restarted to actually use it.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
+                    Button("Restart Now", action: onRestart)
+                }
+            } else if !engine.permissionGranted {
+                Text("Permission not granted yet.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.orange)
+            } else {
+                Text("Permission granted.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
 
             Button("Open Privacy & Security Settings…") {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {

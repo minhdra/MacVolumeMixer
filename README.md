@@ -99,6 +99,14 @@ just silently delivers *zeroed* audio back to us instead of throwing an error. C
 replay, which otherwise presents as "all sound disappeared" with no visible cause. If permission isn't
 granted yet, no app is ever muted, and the popover shows a "Grant Permission…" banner instead.
 
+**Granting permission while MacVolumeMixer is already running is not enough on its own.** Like Screen
+Recording (the same TCC category since macOS Sonoma), the authorization decision appears to be latched
+by `coreaudiod` for a process at the time it first attempts a tap — flipping the toggle in System
+Settings mid-session does not reliably take effect until the app is quit and relaunched. `AudioEngine`
+tracks this explicitly (`needsRelaunchToUsePermission`): once it observes permission turn on partway
+through a run, it refuses to attempt any further taps (rather than muting an app and hitting the same
+silent-audio bug again) and shows a "Restart Now" button instead, in both the popover and Settings.
+
 ## Build & run
 
 Two supported ways to build the exact same source tree:
@@ -173,10 +181,15 @@ approval flow.
 
 - **"All sound disappeared when I opened the app"**: this was a real bug in v0.1.0, fixed in v0.1.1 —
   the app was muting apps at the HAL before confirming it had permission to actually replay their audio
-  (see "Permissions" above for why that combination is silent, not an error). Update to v0.1.1+. If it's
-  still happening, check whether the popover shows a "Grant Permission…" banner and click it; if macOS
-  already denied the permission once, it won't prompt again — grant it manually via Settings → "Open
-  Privacy & Security Settings…".
+  (see "Permissions" above for why that combination is silent, not an error). Update to the latest
+  release. If it's still happening, check whether the popover shows a "Grant Permission…" banner and
+  click it; if macOS already denied the permission once, it won't prompt again — grant it manually via
+  Settings → "Open Privacy & Security Settings…".
+- **"I granted permission but it's still muted/silent"**: granting it while the app was already running
+  isn't enough — see the callout in "Permissions" above. As of v0.1.2 the app detects this itself and
+  shows a **"Restart Now"** button (popover and Settings) instead of trying and failing silently again;
+  click it, or manually quit and reopen the app. This is the one case where you do need to restart
+  MacVolumeMixer for something to take effect.
 - **Quitting seems to leave it running**: also fixed in v0.1.1 — `applicationWillTerminate` now schedules
   an unconditional exit on a background timer as a fallback in case any cleanup call were to hang, so Quit
   can't get stuck. There's also a direct "Quit" button in the popover itself now (not just inside

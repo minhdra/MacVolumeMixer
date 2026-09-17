@@ -7,6 +7,7 @@ struct MixerPopover: View {
     @ObservedObject var engine: AudioEngine
     var onOpenSettings: () -> Void
     var onQuit: () -> Void
+    var onRestart: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -16,7 +17,21 @@ struct MixerPopover: View {
                 .padding(.top, 12)
                 .padding(.bottom, 6)
 
-            if !engine.permissionGranted {
+            if engine.needsRelaunchToUsePermission {
+                // Permission was granted mid-session — macOS/coreaudiod
+                // don't reliably pick that up until the app is relaunched
+                // (same as Screen Recording). Attempting to control volume
+                // now would just reproduce "muted but silent", so this
+                // banner replaces the mixer list entirely until restarted.
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Permission granted. Restart MacVolumeMixer to actually use it — macOS requires this.")
+                        .font(.system(size: 11))
+                    Button("Restart Now", action: onRestart)
+                        .font(.system(size: 11))
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 6)
+            } else if !engine.permissionGranted {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Needs \"Screen & System Audio Recording\" permission to control app volume.")
                         .font(.system(size: 11))
