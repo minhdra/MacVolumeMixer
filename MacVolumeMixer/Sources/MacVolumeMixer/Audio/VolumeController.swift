@@ -27,6 +27,18 @@ final class VolumeController {
     private var aggregateDevice: AudioHardwareAggregateDevice?
     private var ioProcID: AudioDeviceIOProcID?
     private let gainStorage = AtomicFloat(1.0)
+    private let didFireStorage = AtomicFloat(0)
+
+    /// True once the render callback has fired at least once. Used by
+    /// `AudioEngine`'s watchdog to detect the case where tap/aggregate
+    /// creation reported success but the callback never actually runs (seen
+    /// when multiple aggregate devices contend for the same physical output)
+    /// — a silent failure that would otherwise leave a process muted with no
+    /// visible error. This does not detect *authorized-but-silenced* audio
+    /// (the TCC permission case, which delivers real, zeroed callbacks) —
+    /// that's guarded separately, before muting even starts, in
+    /// `AudioEngine.startControllerIfNeeded`.
+    var hasReceivedAnyCallback: Bool { didFireStorage.load() != 0 }
 
     /// 0...1 scalar applied to every sample on every render callback. Safe to
     /// set from the main actor while audio is running — the render callback
@@ -46,6 +58,7 @@ final class VolumeController {
     func start(processObjectIDs: [AudioObjectID], outputDevice: AudioHardwareDevice, initialGain: Float) throws {
         guard !isRunning else { return }
         gain = initialGain
+        didFireStorage.store(0)
 
         let description = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
         description.muteBehavior = .muted
@@ -84,9 +97,11 @@ final class VolumeController {
             // API here, scoped to just this call. Nothing else in this class
             // touches raw AudioObjectGetPropertyData/OSStatus plumbing.
             let gainStorage = self.gainStorage
+            let didFireStorage = self.didFireStorage
             var newIOProcID: AudioDeviceIOProcID?
             try checkOSStatus(
                 AudioDeviceCreateIOProcIDWithBlock(&newIOProcID, aggregateDevice.id, nil) { _, inInputData, _, outOutputData, _ in
+                    didFireStorage.store(1)
                     let inputBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inInputData))
                     let outputBuffers = UnsafeMutableAudioBufferListPointer(outOutputData)
                     var currentGain = gainStorage.load()

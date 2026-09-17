@@ -107,8 +107,13 @@ không gọi thẳng Core Audio bao giờ. Nhờ vậy có thể test logic Audi
    cả**.
 5. `AudioEngine` nhận callback, gom các process con về đúng "app logic" (nhờ `ApplicationResolver`),
    nạp lại volume/mute đã lưu trước đó (nhờ `VolumeStore`), rồi:
-   - Nếu app đó **đang phát tiếng** → tạo một `VolumeController` mới → thực hiện luồng ở mục 3 →
-     câm app ở nguồn, phát lại ở đúng mức volume đã lưu.
+   - Nếu app đó **đang phát tiếng** → trước tiên kiểm tra quyền "Screen & System Audio Recording"
+     (`CGPreflightScreenCaptureAccess()`). **Chưa có quyền thì KHÔNG câm gì cả** — chỉ hiện banner xin
+     quyền trong popover. Có quyền rồi mới tạo `VolumeController` mới → thực hiện luồng ở mục 3 → câm
+     app ở nguồn, phát lại ở đúng mức volume đã lưu. (Lý do bắt buộc kiểm tra trước: tap với
+     `muteBehavior = .muted` vẫn câm được app ngay cả khi CHƯA có quyền — chỉ là dữ liệu âm thanh trả về
+     cho mình sẽ toàn số 0, tức câm thật nhưng phát lại ra toàn im lặng. Đây chính là bug "mất hẳn tiếng"
+     đã gặp và đã sửa ở bản v0.1.1.)
    - Nếu app đó **ngừng phát tiếng** → dừng và huỷ `VolumeController` (không giữ tap chạy không cho
      app im lặng — tiết kiệm tài nguyên).
    - Nếu app **thoát hẳn** → xoá luôn khỏi danh sách hiển thị.
@@ -131,7 +136,22 @@ ngắn hơn, dùng `throws` thay vì tự check `OSStatus` thủ công ở khắ
 và bằng chứng: [audio-architecture.md](audio-architecture.md), phần "Update: a newer, Swift-native Core
 Audio surface exists".
 
-## 7. Giới hạn cần biết (không giấu)
+## 7. Hai bug thực tế đã gặp và cách sửa (v0.1.1)
+
+- **Mất hẳn tiếng khi mở app**: nguyên nhân đúng như cảnh báo ở mục 5 — bản v0.1.0 câm app ngay khi phát
+  hiện nó đang phát tiếng, mà chưa chắc mình đã có quyền để phát lại. Sửa bằng cách gọi
+  `CGPreflightScreenCaptureAccess()` (API public, cùng nhóm quyền với Screen Recording) **trước khi câm
+  bất kỳ app nào** — chưa có quyền thì không đụng vào app đó, chỉ hiện banner "Grant Permission…".
+  Ngoài ra còn thêm một "watchdog": nếu sau 1 giây mà luồng phát lại chưa nhận được buffer nào (trường
+  hợp nhiều aggregate device tranh nhau cùng một thiết bị output vật lý), tự động huỷ tap/bỏ câm thay vì
+  để app đó câm mãi mãi không rõ lý do (`AudioEngine.watchForSilentFailure`).
+- **Bấm Quit không thoát hẳn**: app là menu-bar-only agent (`LSUIElement`), không có Dock icon, không có
+  application menu bar → không có Cmd+Q. Sửa hai việc: (1) thêm nút Quit thẳng trong popover, không phải
+  chui vào Settings mới thấy; (2) `applicationWillTerminate` giờ luôn đặt một hẹn giờ "ép thoát"
+  (`exit(0)`) chạy trên queue nền, độc lập với main thread — dù bước dọn dẹp Core Audio có bị treo vì lý
+  do gì, app vẫn đảm bảo thoát hẳn trong tối đa 1 giây.
+
+## 8. Giới hạn cần biết (không giấu)
 
 - Độ trễ thêm ~5-20ms cho app bị câm-và-phát-lại (một chu kỳ IO của HAL). Không nhận ra được khi nghe
   nhạc/video/họp, có thể nhận ra trong game nhịp điệu (rhythm game).
@@ -142,7 +162,7 @@ Audio surface exists".
 - Kéo slider cho app **đang không phát tiếng** chỉ lưu giá trị, chưa có gì để nghe thử ngay (vì không
   giữ tap chạy khi im lặng, để tiết kiệm tài nguyên).
 
-## 8. Đọc thêm
+## 9. Đọc thêm
 
 - Bằng chứng API, so sánh kiến trúc: [audio-architecture.md](audio-architecture.md)
 - So sánh 4 phương án kiến trúc (A/B/C/D) và lý do chọn B: [architecture-options.md](architecture-options.md)

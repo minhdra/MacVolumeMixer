@@ -31,7 +31,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(
-            rootView: MixerPopover(engine: engine, onOpenSettings: { [weak self] in self?.showSettings() })
+            rootView: MixerPopover(
+                engine: engine,
+                onOpenSettings: { [weak self] in self?.showSettings() },
+                onQuit: { NSApp.terminate(nil) }
+            )
         )
         self.popover = popover
 
@@ -40,10 +44,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Critical for cleanliness: unmutes every process we tapped and
-        // destroys every tap/aggregate device we created. Without this, a
-        // process could stay muted at the HAL after we quit.
+        // Schedule a hard, unconditional exit on a background queue FIRST,
+        // before attempting any cleanup. This guarantees the app actually
+        // quits — no zombie menu bar item left behind — even in the worst
+        // case where a Core Audio teardown call were to hang the main
+        // thread: the background timer keeps running independently and
+        // force-exits regardless.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
+            exit(0)
+        }
+
+        // Best-effort cleanup: unmutes every process we tapped and destroys
+        // every tap/aggregate device we created, so nothing is left silently
+        // muted at the HAL after we quit.
         engine.stop()
+        exit(0)
     }
 
     @objc private func togglePopover(_ sender: AnyObject) {

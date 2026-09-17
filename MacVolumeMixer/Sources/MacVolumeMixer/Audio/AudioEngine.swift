@@ -1,4 +1,5 @@
 import CoreAudio
+import CoreGraphics
 import Foundation
 
 /// Facade that ties `AudioProcessMonitor` (discovery), `ApplicationResolver`
@@ -12,6 +13,17 @@ final class AudioEngine: ObservableObject {
     @Published private(set) var apps: [AudioAppProcess] = []
     @Published var lastError: String?
     @Published private(set) var outputDeviceName: String = "Unknown Output"
+    /// Whether macOS has granted "Screen & System Audio Recording" — the TCC
+    /// category that gates process taps since macOS Sonoma. This is checked
+    /// with the public `CGPreflightScreenCaptureAccess()` API (see
+    /// `requestAudioCapturePermission()`), not inferred from a Core Audio
+    /// error: without this permission, `AudioHardwareCreateProcessTap` still
+    /// succeeds and still mutes the source process, but the tap silently
+    /// delivers *zeroed* audio instead of throwing — so probing for an error
+    /// after the fact would never catch it, and the user would just hear
+    /// permanent silence with no explanation. Checking this gate up front,
+    /// before ever muting anything, is what prevents that.
+    @Published private(set) var permissionGranted: Bool = CGPreflightScreenCaptureAccess()
 
     private let system = AudioHardwareSystem.shared
     private let monitor = AudioProcessMonitor()
@@ -25,12 +37,21 @@ final class AudioEngine: ObservableObject {
 
     func start() {
         monitor.delegate = self
+        permissionGranted = CGPreflightScreenCaptureAccess()
         do {
             try monitor.start()
         } catch {
             lastError = "Could not start audio monitoring: \(error)"
         }
         refreshOutputDeviceName()
+    }
+
+    /// Triggers the system permission prompt if it hasn't been decided yet.
+    /// If the user already denied it once, macOS won't prompt again — this
+    /// just re-reads the current state so the UI can tell the user to grant
+    /// it manually in System Settings instead (see `SettingsView`).
+    func requestAudioCapturePermission() {
+        permissionGranted = CGRequestScreenCaptureAccess()
     }
 
     func stop() {
@@ -127,6 +148,18 @@ extension AudioEngine: AudioProcessMonitorDelegate {
 
     private func startControllerIfNeeded(forKey key: String, app: AudioAppProcess, objectIDs: [AudioObjectID]) {
         guard controllers[key] == nil else { return }
+
+        // Gate on permission BEFORE muting anything. Muting the source
+        // process happens the instant the tap is created, regardless of
+        // whether we're authorized to receive its real audio back — without
+        // this check we'd silence the app first and only find out we can't
+        // actually replay it after the fact.
+        permissionGranted = CGPreflightScreenCaptureAccess()
+        guard permissionGranted else {
+            lastError = "MacVolumeMixer needs \"Screen & System Audio Recording\" permission before it can control \(app.displayName)'s volume. Open Settings to grant it."
+            return
+        }
+
         guard let outputDevice = try? system.defaultOutputDevice else {
             lastError = "No default output device available."
             return
@@ -136,8 +169,27 @@ extension AudioEngine: AudioProcessMonitorDelegate {
         do {
             try controller.start(processObjectIDs: objectIDs, outputDevice: outputDevice, initialGain: app.effectiveGain)
             controllers[key] = controller
+            watchForSilentFailure(key: key, controller: controller, displayName: app.displayName)
         } catch {
-            lastError = "Could not control volume for \(app.displayName): \(error). macOS may be waiting for Audio Recording permission in System Settings > Privacy & Security."
+            lastError = "Could not control volume for \(app.displayName): \(error)."
+        }
+    }
+
+    /// Guards against the render callback never firing at all (observed with
+    /// multiple aggregate devices contending for the same physical output
+    /// device) — a distinct failure mode from the permission gate above,
+    /// since here the callback registration itself silently never runs. If
+    /// nothing has arrived within a second, tear the controller down
+    /// (unmuting its process) instead of leaving the app permanently
+    /// silent with no visible explanation.
+    private func watchForSilentFailure(key: String, controller: VolumeController, displayName: String) {
+        Task { @MainActor [weak self, weak controller] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let self, let controller, self.controllers[key] === controller else { return }
+            guard !controller.hasReceivedAnyCallback else { return }
+            controller.stop()
+            self.controllers[key] = nil
+            self.lastError = "Couldn't start audio for \(displayName) — try again, or quit and reopen MacVolumeMixer."
         }
     }
 }

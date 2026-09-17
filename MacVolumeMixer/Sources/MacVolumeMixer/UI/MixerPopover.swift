@@ -6,6 +6,7 @@ import SwiftUI
 struct MixerPopover: View {
     @ObservedObject var engine: AudioEngine
     var onOpenSettings: () -> Void
+    var onQuit: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -15,7 +16,16 @@ struct MixerPopover: View {
                 .padding(.top, 12)
                 .padding(.bottom, 6)
 
-            if let lastError = engine.lastError {
+            if !engine.permissionGranted {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Needs \"Screen & System Audio Recording\" permission to control app volume.")
+                        .font(.system(size: 11))
+                    Button("Grant Permission…") { engine.requestAudioCapturePermission() }
+                        .font(.system(size: 11))
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 6)
+            } else if let lastError = engine.lastError {
                 Text(lastError)
                     .font(.system(size: 11))
                     .foregroundStyle(.orange)
@@ -59,12 +69,23 @@ struct MixerPopover: View {
             .padding(.horizontal, 14)
             .padding(.top, 8)
 
-            Button("Settings…", action: onOpenSettings)
-                .buttonStyle(.plain)
-                .font(.system(size: 12))
-                .padding(.horizontal, 14)
-                .padding(.top, 4)
-                .padding(.bottom, 12)
+            // MacVolumeMixer is a menu-bar-only agent (no Dock icon, no
+            // application menu bar), so Cmd+Q and "right-click Dock icon >
+            // Quit" don't exist for it — Quit needs to be reachable directly
+            // from this popover, not buried one extra click inside Settings.
+            HStack {
+                Button("Settings…", action: onOpenSettings)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12))
+                Spacer()
+                Button("Quit", action: onQuit)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 4)
+            .padding(.bottom, 12)
         }
         .frame(width: 280)
     }

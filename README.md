@@ -88,11 +88,16 @@ No Clean-Architecture layering, no Redux, no DI framework, no event bus — one 
 ## Permissions
 
 The **only** permission this app requests is the system-managed **"Audio Recording" / "Screen & System
-Audio Recording"** TCC prompt, shown automatically by macOS the first time a process tap is created.
-There is no public `Info.plist` usage-description key for it (same as Screen Recording) — the app does
-**not** request microphone access, because it never uses the microphone. If permission hasn't been
-granted yet, tap creation fails and the popover shows an inline message with a button straight to
-System Settings → Privacy & Security (`SettingsView.swift`).
+Audio Recording"** TCC prompt. There is no public `Info.plist` usage-description key for it (same as
+Screen Recording) — the app does **not** request microphone access, because it never uses the microphone.
+
+This gate is checked with the public `CGPreflightScreenCaptureAccess()`/`CGRequestScreenCaptureAccess()`
+API **before** ever creating a tap. This matters more than it sounds: `AudioHardwareCreateProcessTap`
+with `muteBehavior = .muted` **succeeds and mutes the source process even without this permission** — it
+just silently delivers *zeroed* audio back to us instead of throwing an error. Checking the gate first
+(`AudioEngine.startControllerIfNeeded`) is what stops the app from muting an app it then can't actually
+replay, which otherwise presents as "all sound disappeared" with no visible cause. If permission isn't
+granted yet, no app is ever muted, and the popover shows a "Grant Permission…" banner instead.
 
 ## Build & run
 
@@ -163,6 +168,20 @@ this SDK. For distribution: `Product → Archive` in Xcode, then Developer ID si
 `xcrun notarytool submit` and staple, then distribute as a `.zip` or `.dmg`. No special entitlements are
 needed beyond the app's own Developer ID identity — no kernel extension entitlement, no System Extension
 approval flow.
+
+## Troubleshooting
+
+- **"All sound disappeared when I opened the app"**: this was a real bug in v0.1.0, fixed in v0.1.1 —
+  the app was muting apps at the HAL before confirming it had permission to actually replay their audio
+  (see "Permissions" above for why that combination is silent, not an error). Update to v0.1.1+. If it's
+  still happening, check whether the popover shows a "Grant Permission…" banner and click it; if macOS
+  already denied the permission once, it won't prompt again — grant it manually via Settings → "Open
+  Privacy & Security Settings…".
+- **Quitting seems to leave it running**: also fixed in v0.1.1 — `applicationWillTerminate` now schedules
+  an unconditional exit on a background timer as a fallback in case any cleanup call were to hang, so Quit
+  can't get stuck. There's also a direct "Quit" button in the popover itself now (not just inside
+  Settings) — this app has no Dock icon and no application menu bar (it's a menu-bar-only agent), so
+  Cmd+Q doesn't apply to it.
 
 ## Known limitations
 
