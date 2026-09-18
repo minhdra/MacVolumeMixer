@@ -44,4 +44,24 @@ struct AudioAppProcess: Identifiable, Equatable {
     var isMuted: Bool
 
     var effectiveGain: Float { isMuted ? 0 : volume }
+
+    /// At full volume there is no reason to intercept the app's audio.
+    var needsVolumeProcessing: Bool { isMuted || volume < 0.999 }
+
+    /// Keep real media players in the primary view even while paused. Other
+    /// apps only enter it while Core Audio reports active output; notification
+    /// and utility clients fall back to the More view afterward.
+    var belongsInMediaSection: Bool {
+        if isPlayingAudio { return true }
+        guard let bundleID else { return false }
+        let mediaBundleIDs = [
+            "com.apple.Music",
+            "com.apple.Podcasts",
+            "com.apple.TV",
+            "com.spotify.client",
+            "org.videolan.vlc",
+            "com.colliderli.iina"
+        ]
+        return mediaBundleIDs.contains(bundleID)
+    }
 }

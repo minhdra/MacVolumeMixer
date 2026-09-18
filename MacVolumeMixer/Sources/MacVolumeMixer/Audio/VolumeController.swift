@@ -10,7 +10,7 @@ import Foundation
 /// Signal path (see docs/audio-architecture.md for why this is the smallest
 /// architecture that gives *real* per-app volume with only public API):
 ///
-///     tapped processes --(CATapDescription, muteBehavior = .muted)-->
+///     tapped processes --(CATapDescription, muteBehavior = .mutedWhenTapped)-->
 ///     process tap --(wrapped in a private, ephemeral aggregate device
 ///     together with the real output device)--> our AudioDeviceIOProc
 ///     (scales samples by `gain`) --> real output device
@@ -19,15 +19,17 @@ import Foundation
 /// idempotent and safe to call multiple times (deinit calls it too), which is
 /// what keeps this leak-free: no dangling AudioObjectIDs, no un-Block_copy'd
 /// IOProc, no tap left muted after we stop owning it.
-final class VolumeController {
+final class VolumeController: @unchecked Sendable {
     private let system = AudioHardwareSystem.shared
     private let label: String
+    private let onCaptureReady: @MainActor @Sendable () -> Void
 
     private var tap: AudioHardwareTap?
     private var aggregateDevice: AudioHardwareAggregateDevice?
     private var ioProcID: AudioDeviceIOProcID?
     private let gainStorage = AtomicFloat(1.0)
     private let didFireStorage = AtomicFloat(0)
+    private let didFindAudioStorage = AtomicFloat(0)
 
     /// True once the render callback has fired at least once. Used by
     /// `AudioEngine`'s watchdog to detect the case where tap/aggregate
@@ -39,6 +41,7 @@ final class VolumeController {
     /// that's guarded separately, before muting even starts, in
     /// `AudioEngine.startControllerIfNeeded`.
     var hasReceivedAnyCallback: Bool { didFireStorage.load() != 0 }
+    var hasReceivedAudibleAudio: Bool { didFindAudioStorage.load() != 0 }
 
     /// 0...1 scalar applied to every sample on every render callback. Safe to
     /// set from the main actor while audio is running — the render callback
@@ -51,17 +54,21 @@ final class VolumeController {
 
     private(set) var isRunning = false
 
-    init(label: String) {
+    init(label: String, onCaptureReady: @escaping @MainActor @Sendable () -> Void) {
         self.label = label
+        self.onCaptureReady = onCaptureReady
     }
 
     func start(processObjectIDs: [AudioObjectID], outputDevice: AudioHardwareDevice, initialGain: Float) throws {
         guard !isRunning else { return }
         gain = initialGain
         didFireStorage.store(0)
+        didFindAudioStorage.store(0)
 
         let description = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
-        description.muteBehavior = .muted
+        // Fail open until the tap proves it receives real PCM. A denied or
+        // stale capture permission may still produce zero-filled callbacks.
+        description.muteBehavior = .unmuted
         description.isPrivate = true
         description.name = "MacVolumeMixer-tap-\(label)"
         let tapUUID = UUID()
@@ -98,6 +105,7 @@ final class VolumeController {
             // touches raw AudioObjectGetPropertyData/OSStatus plumbing.
             let gainStorage = self.gainStorage
             let didFireStorage = self.didFireStorage
+            let didFindAudioStorage = self.didFindAudioStorage
             var newIOProcID: AudioDeviceIOProcID?
             try checkOSStatus(
                 AudioDeviceCreateIOProcIDWithBlock(&newIOProcID, aggregateDevice.id, nil) { _, inInputData, _, outOutputData, _ in
@@ -105,6 +113,7 @@ final class VolumeController {
                     let inputBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inInputData))
                     let outputBuffers = UnsafeMutableAudioBufferListPointer(outOutputData)
                     var currentGain = gainStorage.load()
+                    var containsAudio = false
 
                     for (inBuffer, outBuffer) in zip(inputBuffers, outputBuffers) {
                         guard let inData = inBuffer.mData, let outData = outBuffer.mData else { continue }
@@ -112,7 +121,17 @@ final class VolumeController {
                         guard frameCount > 0 else { continue }
                         let inFloats = inData.assumingMemoryBound(to: Float32.self)
                         let outFloats = outData.assumingMemoryBound(to: Float32.self)
+                        if didFindAudioStorage.load() == 0 {
+                            for index in 0..<frameCount where abs(inFloats[index]) > 0.000_001 {
+                                containsAudio = true
+                                break
+                            }
+                        }
                         vDSP_vsmul(inFloats, 1, &currentGain, outFloats, 1, vDSP_Length(frameCount))
+                    }
+                    if containsAudio && didFindAudioStorage.load() == 0 {
+                        didFindAudioStorage.store(1)
+                        DispatchQueue.main.async { [weak self] in self?.enableSafeMuting() }
                     }
                 },
                 "AudioDeviceCreateIOProcIDWithBlock(\(label))"
@@ -129,6 +148,20 @@ final class VolumeController {
             // leave a process muted with nothing replaying its audio.
             try? system.destroyProcessTap(tap)
             throw error
+        }
+    }
+
+    /// Only replace the source path after capture is known-good. This mode
+    /// also restores the source automatically whenever our IOProc stops reading.
+    @MainActor
+    private func enableSafeMuting() {
+        guard isRunning, let tap, let description = try? tap.description else { return }
+        description.muteBehavior = .mutedWhenTapped
+        do {
+            try tap.setDescription(description)
+            onCaptureReady()
+        } catch {
+            // Remain unmuted: losing volume control is safer than silence.
         }
     }
 

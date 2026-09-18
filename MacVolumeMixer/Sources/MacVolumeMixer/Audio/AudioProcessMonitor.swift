@@ -34,6 +34,7 @@ final class AudioProcessMonitor: NSObject, PropertyListenerDelegate {
     private let system = AudioHardwareSystem.shared
     private var watchedProcesses: [AudioObjectID: (object: AudioHardwareProcess, listener: RunningStateListener)] = [:]
     private var started = false
+    private var recoveryTimer: Timer?
 
     private static let processListAddress = PropertyAddress(kAudioHardwarePropertyProcessObjectList)
     private static let isRunningOutputAddress = PropertyAddress(kAudioProcessPropertyIsRunningOutput)
@@ -44,11 +45,16 @@ final class AudioProcessMonitor: NSObject, PropertyListenerDelegate {
         system.delegates.append(self)
         try system.addListener(forProperties: [Self.processListAddress])
         refreshWatchedProcessSet()
+        recoveryTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshWatchedProcessSet() }
+        }
     }
 
     func stop() {
         guard started else { return }
         started = false
+        recoveryTimer?.invalidate()
+        recoveryTimer = nil
         try? system.removeListener(forProperties: [Self.processListAddress])
         system.delegates.removeAll { ($0 as AnyObject) === self }
         for (object, listener) in watchedProcesses.values {

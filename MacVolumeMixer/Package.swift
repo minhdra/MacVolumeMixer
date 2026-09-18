@@ -21,6 +21,10 @@ let package = Package(
             name: "MacVolumeMixer",
             path: "Sources/MacVolumeMixer",
             exclude: ["Resources/Info.plist"],
+            resources: [
+                .copy("Resources/MenuBarIcon.png"),
+                .copy("Resources/ControlPanelIcon.png")
+            ],
             linkerSettings: [
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",

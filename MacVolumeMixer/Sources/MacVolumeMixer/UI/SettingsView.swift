@@ -65,7 +65,7 @@ struct SettingsView: View {
     // state started before this window ever exists is reflected here too.
     @ObservedObject var engine: AudioEngine
     @ObservedObject var updateChecker: UpdateCheckViewModel
-    var onRestart: () -> Void
+    @ObservedObject var loginItemManager: LoginItemManager
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -76,26 +76,37 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if engine.needsRelaunchToUsePermission {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Permission granted, but macOS needs MacVolumeMixer restarted to actually use it.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.orange)
-                    Button("Restart Now", action: onRestart)
-                }
-            } else if !engine.permissionGranted {
-                Text("Permission not granted yet.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-            } else {
-                Text("Permission granted.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
+            Label(permissionText, systemImage: permissionIcon)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(permissionColor)
 
             Button("Open Privacy & Security Settings…") {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") {
                     NSWorkspace.shared.open(url)
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle(
+                    "Open MacVolumeMixer at login",
+                    isOn: Binding(
+                        get: { loginItemManager.isEnabled },
+                        set: { loginItemManager.setEnabled($0) }
+                    )
+                )
+                .toggleStyle(.checkbox)
+                .font(.system(size: 12))
+
+                if loginItemManager.requiresApproval {
+                    Text("Allow MacVolumeMixer in System Settings → General → Login Items.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                } else if let error = loginItemManager.lastError {
+                    Text(error)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
                 }
             }
 
@@ -147,5 +158,32 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(width: 360)
+    }
+
+    private var permissionText: String {
+        switch engine.capturePermissionState {
+        case .notVerified: "Audio access has not been verified"
+        case .requesting: "Waiting for audio access"
+        case .granted: "Audio access granted"
+        case .needsPermission: "Audio access is required"
+        }
+    }
+
+    private var permissionIcon: String {
+        switch engine.capturePermissionState {
+        case .granted: "checkmark.circle.fill"
+        case .requesting: "clock.fill"
+        case .needsPermission: "exclamationmark.circle.fill"
+        case .notVerified: "questionmark.circle.fill"
+        }
+    }
+
+    private var permissionColor: Color {
+        switch engine.capturePermissionState {
+        case .granted: .green
+        case .requesting: .orange
+        case .needsPermission: .red
+        case .notVerified: .secondary
+        }
     }
 }

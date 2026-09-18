@@ -23,23 +23,37 @@ enum ApplicationResolver {
         let bundleID: String?
         let displayName: String
         let icon: NSImage?
+        let isUserFacing: Bool
     }
 
     static func resolve(pid: pid_t, hintedBundleID: String?) -> Resolved {
-        if let ownerAppPath = outermostAppBundlePath(forPID: pid), let bundle = Bundle(path: ownerAppPath) {
+        let runningAppPath = NSRunningApplication(processIdentifier: pid)?.bundleURL?.path
+        let installedAppPath = hintedBundleID.flatMap {
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)?.path
+        }
+
+        if let ownerAppPath = outermostAppBundlePath(forPID: pid) ?? runningAppPath ?? installedAppPath,
+           let bundle = Bundle(path: ownerAppPath) {
             let name = (bundle.infoDictionary?["CFBundleName"] as? String)
                 ?? (bundle.infoDictionary?["CFBundleDisplayName"] as? String)
                 ?? FileManager.default.displayName(atPath: ownerAppPath).replacingOccurrences(of: ".app", with: "")
             let icon = NSWorkspace.shared.icon(forFile: ownerAppPath)
-            return Resolved(bundleID: bundle.bundleIdentifier ?? hintedBundleID, displayName: name, icon: icon)
+            let isBackgroundOnly = (bundle.infoDictionary?["LSBackgroundOnly"] as? Bool) == true
+            let isCoreSystemApp = ownerAppPath.hasPrefix("/System/Library/CoreServices/")
+            return Resolved(
+                bundleID: bundle.bundleIdentifier ?? hintedBundleID,
+                displayName: name,
+                icon: icon,
+                isUserFacing: !isBackgroundOnly && !isCoreSystemApp
+            )
         }
 
         // Fall back to whatever the HAL told us (bare daemons with no .app
         // bundle, e.g. system audio components) rather than dropping the row.
         if let hintedBundleID {
-            return Resolved(bundleID: hintedBundleID, displayName: hintedBundleID, icon: nil)
+            return Resolved(bundleID: hintedBundleID, displayName: hintedBundleID, icon: nil, isUserFacing: false)
         }
-        return Resolved(bundleID: nil, displayName: "PID \(pid)", icon: NSWorkspace.shared.icon(for: .unixExecutable))
+        return Resolved(bundleID: nil, displayName: "PID \(pid)", icon: nil, isUserFacing: false)
     }
 
     private static func outermostAppBundlePath(forPID pid: pid_t) -> String? {

@@ -75,6 +75,8 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 cp "$BINARY_PATH" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 cp "$PACKAGE_DIR/Sources/$APP_NAME/Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+cp "$PACKAGE_DIR/Sources/$APP_NAME/Resources/MenuBarIcon.png" "$APP_BUNDLE/Contents/Resources/MenuBarIcon.png"
+cp "$PACKAGE_DIR/Sources/$APP_NAME/Resources/ControlPanelIcon.png" "$APP_BUNDLE/Contents/Resources/ControlPanelIcon.png"
 
 # Stamp the requested version into the bundle's Info.plist (source-controlled
 # Info.plist keeps static placeholder values; this is the one place version

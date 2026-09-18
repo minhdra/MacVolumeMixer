@@ -87,25 +87,13 @@ No Clean-Architecture layering, no Redux, no DI framework, no event bus — one 
 
 ## Permissions
 
-The **only** permission this app requests is the system-managed **"Audio Recording" / "Screen & System
-Audio Recording"** TCC prompt. There is no public `Info.plist` usage-description key for it (same as
-Screen Recording) — the app does **not** request microphone access, because it never uses the microphone.
+The **only** permission this app requests is macOS **System Audio Recording**. The bundle includes
+Apple's required `NSAudioCaptureUsageDescription`; it does **not** request microphone access.
 
-This gate is checked with the public `CGPreflightScreenCaptureAccess()`/`CGRequestScreenCaptureAccess()`
-API **before** ever creating a tap. This matters more than it sounds: `AudioHardwareCreateProcessTap`
-with `muteBehavior = .muted` **succeeds and mutes the source process even without this permission** — it
-just silently delivers *zeroed* audio back to us instead of throwing an error. Checking the gate first
-(`AudioEngine.startControllerIfNeeded`) is what stops the app from muting an app it then can't actually
-replay, which otherwise presents as "all sound disappeared" with no visible cause. If permission isn't
-granted yet, no app is ever muted, and the popover shows a "Grant Permission…" banner instead.
-
-**Granting permission while MacVolumeMixer is already running is not enough on its own.** Like Screen
-Recording (the same TCC category since macOS Sonoma), the authorization decision appears to be latched
-by `coreaudiod` for a process at the time it first attempts a tap — flipping the toggle in System
-Settings mid-session does not reliably take effect until the app is quit and relaunched. `AudioEngine`
-tracks this explicitly (`needsRelaunchToUsePermission`): once it observes permission turn on partway
-through a run, it refuses to attempt any further taps (rather than muting an app and hitting the same
-silent-audio bug again) and shows a "Restart Now" button instead, in both the popover and Settings.
+The audio path is deliberately fail-open. Apps at 100% volume use no tap. When a lower volume is
+requested, capture starts unmuted and changes to `mutedWhenTapped` only after real PCM arrives. A denied
+permission, zero-filled tap, failed callback, or stopped IOProc therefore leaves the app's original
+audio path audible instead of silencing the Mac.
 
 ## Build & run
 

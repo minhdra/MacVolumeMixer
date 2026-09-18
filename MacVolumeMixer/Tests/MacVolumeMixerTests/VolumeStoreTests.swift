@@ -54,8 +54,13 @@ private func makeStore() -> VolumeStore {
         isMuted: false
     )
     #expect(app.effectiveGain == 0.65)
+    #expect(app.needsVolumeProcessing)
 
     app.isMuted = true
     #expect(app.effectiveGain == 0)
     #expect(app.volume == 0.65) // muting never touches the stored volume
+
+    app.isMuted = false
+    app.volume = 1
+    #expect(!app.needsVolumeProcessing) // full volume must not create a tap
 }

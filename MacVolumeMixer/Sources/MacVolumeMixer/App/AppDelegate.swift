@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindowController: NSWindowController?
     private let engine = AudioEngine()
     private let updateChecker = UpdateCheckViewModel()
+    private let loginItemManager = LoginItemManager()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Belt-and-suspenders alongside Info.plist's LSUIElement: guarantees
@@ -23,7 +24,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "Audio Mixer")
+            if let url = AppResources.url(forResource: "ControlPanelIcon", withExtension: "png"),
+               let image = NSImage(contentsOf: url) {
+                image.size = NSSize(width: 18, height: 18)
+                image.isTemplate = true
+                image.accessibilityDescription = "Audio Mixer"
+                button.image = image
+            }
             button.action = #selector(togglePopover(_:))
             button.target = self
         }
@@ -34,8 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rootView: MixerPopover(
                 engine: engine,
                 onOpenSettings: { [weak self] in self?.showSettings() },
-                onQuit: { NSApp.terminate(nil) },
-                onRestart: { [weak self] in self?.relaunch() }
+                onQuit: { NSApp.terminate(nil) }
             )
         )
         self.popover = popover
@@ -62,22 +68,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         exit(0)
     }
 
-    /// Relaunches the app in a fresh process. Needed after the user grants
-    /// audio-capture permission mid-session: macOS/coreaudiod latch the
-    /// authorization decision at the time a process's first tap attempt is
-    /// made, so a permission grant while already running doesn't reliably
-    /// take effect until relaunch (see `AudioEngine.needsRelaunchToUsePermission`).
-    /// Spawns a new instance via `/usr/bin/open` before exiting this one, so
-    /// there's no gap where the menu bar icon disappears entirely.
-    private func relaunch() {
-        engine.stop() // unmute everything before we go, same as a normal quit
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        task.arguments = [Bundle.main.bundlePath]
-        try? task.run()
-        exit(0)
-    }
-
     @objc private func togglePopover(_ sender: AnyObject) {
         guard let button = statusItem.button else { return }
         if popover.isShown {
@@ -90,16 +80,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showSettings() {
         popover.performClose(nil)
+        loginItemManager.refresh()
         if settingsWindowController == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 360, height: 340),
+                contentRect: NSRect(x: 0, y: 0, width: 360, height: 420),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false
             )
             window.title = "MacVolumeMixer Settings"
             window.contentViewController = NSHostingController(
-                rootView: SettingsView(engine: engine, updateChecker: updateChecker, onRestart: { [weak self] in self?.relaunch() })
+                rootView: SettingsView(
+                    engine: engine,
+                    updateChecker: updateChecker,
+                    loginItemManager: loginItemManager
+                )
             )
             window.center()
             settingsWindowController = NSWindowController(window: window)

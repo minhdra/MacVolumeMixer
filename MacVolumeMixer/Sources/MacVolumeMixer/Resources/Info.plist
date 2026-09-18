@@ -16,6 +16,8 @@
 	<string>APPL</string>
 	<key>CFBundleExecutable</key>
 	<string>MacVolumeMixer</string>
+	<key>CFBundleIconFile</key>
+	<string>MenuBarIcon</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
 	<!-- Menu bar agent: no Dock icon, no main window. -->
@@ -25,14 +27,7 @@
 	<string>public.app-category.utilities</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright. All rights reserved.</string>
-	<!--
-	  We deliberately do NOT declare NSMicrophoneUsageDescription: this app never
-	  touches the microphone. Per-process audio capture/tap (used to re-synthesize
-	  a muted app's audio at our own gain) is gated by a system-managed "Audio
-	  Recording" / "Screen & System Audio Recording" TCC prompt that macOS shows
-	  automatically the first time AudioHardwareCreateProcessTap is called — there
-	  is no public Info.plist usage-description key for it (same as Screen
-	  Recording). See docs/audio-architecture.md.
-	-->
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>MacVolumeMixer captures an app's output only while applying its volume setting.</string>
 </dict>
 </plist>
